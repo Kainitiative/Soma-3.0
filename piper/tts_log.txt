@@ -1,8 +1,8 @@
-[2025-12-28 20:24:19.581] [piper] [info] Loaded voice in 0.2779985 second(s)
-[2025-12-28 20:24:19.593] [piper] [info] Initialized piper
+[2025-12-28 20:39:25.785] [piper] [info] Loaded voice in 0.2272685 second(s)
+[2025-12-28 20:39:25.799] [piper] [info] Initialized piper
 C:\Soma3\piper\soma_last.wav
-[2025-12-28 20:24:21.566] [piper] [info] Real-time factor: 0.10845254127191742 (infer=1.9478765 sec, audio=17.96063492063492 sec)
-[2025-12-28 20:24:21.566] [piper] [info] Terminated piper
+[2025-12-28 20:39:26.383] [piper] [info] Real-time factor: 0.07068533203124999 (infer=0.5629694 sec, audio=7.964444444444444 sec)
+[2025-12-28 20:39:26.383] [piper] [info] Terminated piper
 
 PIPER EXIT: 0
 

@@ -5,8 +5,9 @@ contextBridge.exposeInMainWorld("soma", {
   snapshot: () => ipcRenderer.invoke("soma:snapshot"),
   stop: () => ipcRenderer.invoke("soma:stop"),
   mute: (val) => ipcRenderer.invoke("soma:mute", val),
-  getSessionInfo: () => ipcRenderer.invoke("soma:session-info"),
-  getHistory: () => ipcRenderer.invoke("soma:get-history"),
-  newSession: () => ipcRenderer.invoke("soma:new-session"),
+  startRecording: () => ipcRenderer.invoke("soma:startRecording"),
+  stopRecording: () => ipcRenderer.invoke("soma:stopRecording"),
+  cancelRecording: () => ipcRenderer.invoke("soma:cancelRecording"),
+  getSTTStatus: () => ipcRenderer.invoke("soma:getSTTStatus"),
+  onVoiceHotkey: (callback) => ipcRenderer.on('voice-hotkey-pressed', callback),
 });
-

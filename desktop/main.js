@@ -1,102 +1,27 @@
 ﻿const { app, Tray, Menu, BrowserWindow, nativeImage, globalShortcut, ipcMain } = require("electron");
 const path = require("path");
-const fs = require("fs");
 const { spawn } = require("child_process");
 const screenshot = require("screenshot-desktop");
 const activeWin = require("active-win");
 const sharp = require("sharp");
+const STTManager = require("./stt-manager");
 
 let tray = null;
 let win = null;
+let sttManager = null;
 
 // Brain endpoints
 const CHAT_URL = process.env.SOMA_BRAIN_CHAT_URL || "http://localhost:7171/chat";
 const VISION_URL = process.env.SOMA_BRAIN_VISION_URL || "http://localhost:7171/vision";
-const HISTORY_URL = process.env.SOMA_BRAIN_HISTORY_URL || "http://localhost:7171/history";
-
-// Session persistence
-const SESSION_FILE = path.join(app.getPath('userData'), '.soma_session');
-const SESSION_TIMEOUT_DAYS = 7; // Start new session after 7 days
-
-// Load or create session ID
-function getOrCreateSessionId() {
+// Level 2 Working Memory (session identity)
+// One stable id per app run. Clears on restart.
+const SOMA_SESSION_ID = (() => {
   const crypto = require("crypto");
-  
-  try {
-    // Try to load existing session
-    if (fs.existsSync(SESSION_FILE)) {
-      const data = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
-      const sessionAge = Date.now() - data.timestamp;
-      const maxAge = SESSION_TIMEOUT_DAYS * 24 * 60 * 60 * 1000;
-      
-      // Reuse session if it's recent (within timeout period)
-      if (sessionAge < maxAge) {
-        console.log("[SOMA] Resuming session:", data.sessionId);
-        console.log("[SOMA] Session age:", Math.floor(sessionAge / 1000 / 60 / 60), "hours");
-        return data.sessionId;
-      } else {
-        console.log("[SOMA] Session expired, creating new session");
-      }
-    }
-  } catch (error) {
-    console.log("[SOMA] Could not load session:", error.message);
-  }
-  
-  // Create new session ID
-  const newSessionId = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString("hex");
-  
-  try {
-    // Save session to file
-    fs.writeFileSync(SESSION_FILE, JSON.stringify({
-      sessionId: newSessionId,
-      timestamp: Date.now(),
-      created: new Date().toISOString()
-    }));
-    console.log("[SOMA] Created new session:", newSessionId);
-  } catch (error) {
-    console.log("[SOMA] Could not save session:", error.message);
-  }
-  
-  return newSessionId;
-}
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return crypto.randomBytes(16).toString("hex");
+})();
 
-// Update session timestamp (keep session alive)
-function updateSessionTimestamp() {
-  try {
-    if (fs.existsSync(SESSION_FILE)) {
-      const data = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
-      data.timestamp = Date.now();
-      data.lastActive = new Date().toISOString();
-      fs.writeFileSync(SESSION_FILE, JSON.stringify(data));
-    }
-  } catch (error) {
-    console.log("[SOMA] Could not update session:", error.message);
-  }
-}
-
-// Start new session manually
-function startNewSession() {
-  const crypto = require("crypto");
-  const newSessionId = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString("hex");
-  
-  try {
-    fs.writeFileSync(SESSION_FILE, JSON.stringify({
-      sessionId: newSessionId,
-      timestamp: Date.now(),
-      created: new Date().toISOString()
-    }));
-    console.log("[SOMA] Started new session:", newSessionId);
-    return newSessionId;
-  } catch (error) {
-    console.log("[SOMA] Could not create new session:", error.message);
-    return newSessionId;
-  }
-}
-
-let SOMA_SESSION_ID = getOrCreateSessionId();
-
-// Update session timestamp every 5 minutes to keep it active
-setInterval(updateSessionTimestamp, 5 * 60 * 1000);
+console.log("[SOMA] Session ID:", SOMA_SESSION_ID);
 
 
 // Speech control
@@ -215,56 +140,6 @@ function toggleWindow() {
   win.focus();
 }
 
-// View conversation history
-async function viewHistory() {
-  try {
-    const historyUrl = `${HISTORY_URL}/${SOMA_SESSION_ID}?limit=50`;
-    const res = await fetch(historyUrl, {
-      headers: { "x-session-id": SOMA_SESSION_ID }
-    });
-    
-    if (!res.ok) {
-      throw new Error(`Failed to fetch history: ${res.status}`);
-    }
-    
-    const data = await res.json();
-    const history = data.history || [];
-    
-    if (history.length === 0) {
-      speakWindowsTTS("No conversation history found for this session.");
-      return;
-    }
-    
-    // Create a simple text summary
-    let summary = `You have ${history.length} messages in this session. `;
-    const recent = history.slice(-3);
-    summary += "Here are the last few exchanges.";
-    
-    speakWindowsTTS(summary);
-    
-    // Log to console for user to see
-    console.log("\n=== Conversation History ===");
-    history.forEach(msg => {
-      const time = new Date(msg.timestamp).toLocaleString();
-      console.log(`[${time}] ${msg.role}: ${msg.content}`);
-    });
-    console.log("========================\n");
-    
-  } catch (error) {
-    console.error("[HISTORY] Error:", error);
-    speakWindowsTTS("Could not retrieve conversation history.");
-  }
-}
-
-// Start a new session
-function resetSession() {
-  const oldSession = SOMA_SESSION_ID;
-  SOMA_SESSION_ID = startNewSession();
-  
-  console.log(`[SOMA] Session reset: ${oldSession} -> ${SOMA_SESSION_ID}`);
-  speakWindowsTTS("Started a new session. Previous conversations are saved and can be accessed from the database.");
-}
-
 async function postJSON(url, body) {
   const res = await fetch(url, {
     method: "POST",
@@ -292,9 +167,6 @@ app.whenReady().then(() => {
     Menu.buildFromTemplate([
       { label: "Open Soma Input", click: () => toggleWindow() },
       { type: "separator" },
-      { label: "View Conversation History", click: () => viewHistory() },
-      { label: "Start New Session", click: () => resetSession() },
-      { type: "separator" },
       { label: "Mute/Unmute (Ctrl+M)", click: () => { isMuted = !isMuted; if (isMuted) stopSpeech(); } },
       { label: "Stop Speaking", click: () => stopSpeech() },
       { type: "separator" },
@@ -305,6 +177,11 @@ app.whenReady().then(() => {
   tray.on("click", () => toggleWindow());
 
   createWindow();
+
+  // Initialize STT Manager
+  sttManager = new STTManager();
+  const sttStatus = sttManager.getStatus();
+  console.log('[SOMA] STT initialized:', sttStatus.engine);
 
   // Hotkey to open the input
   globalShortcut.register("Control+Shift+Space", () => toggleWindow());
@@ -317,6 +194,13 @@ app.whenReady().then(() => {
 
   // Hotkey to stop speech immediately
   globalShortcut.register("Control+Shift+S", () => stopSpeech());
+
+  // Hotkey for push-to-talk voice input
+  globalShortcut.register("Control+Shift+V", () => {
+    if (win && win.isVisible()) {
+      win.webContents.send('voice-hotkey-pressed');
+    }
+  });
 });
 
 app.on("window-all-closed", (e) => e.preventDefault());
@@ -386,60 +270,36 @@ ipcMain.handle("soma:mute", async (event, value) => {
   return { ok: true, muted: isMuted };
 });
 
-// IPC: Get session info
-ipcMain.handle("soma:session-info", async () => {
-  try {
-    if (fs.existsSync(SESSION_FILE)) {
-      const data = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
-      const sessionAge = Date.now() - data.timestamp;
-      return {
-        ok: true,
-        sessionId: SOMA_SESSION_ID,
-        created: data.created,
-        ageHours: Math.floor(sessionAge / 1000 / 60 / 60),
-        ageDays: Math.floor(sessionAge / 1000 / 60 / 60 / 24)
-      };
-    }
-  } catch (error) {
-    return { ok: false, error: error.message };
+// IPC: Voice Recording (STT)
+ipcMain.handle("soma:startRecording", async () => {
+  if (!sttManager) {
+    return { ok: false, error: "STT not initialized" };
   }
-  return { ok: true, sessionId: SOMA_SESSION_ID };
+  return sttManager.startRecording();
 });
 
-// IPC: Get conversation history
-ipcMain.handle("soma:get-history", async () => {
-  try {
-    const historyUrl = `${HISTORY_URL}/${SOMA_SESSION_ID}?limit=50`;
-    const res = await fetch(historyUrl, {
-      headers: { "x-session-id": SOMA_SESSION_ID }
-    });
-    
-    if (!res.ok) {
-      throw new Error(`Failed to fetch history: ${res.status}`);
-    }
-    
-    const data = await res.json();
-    return { ok: true, history: data.history || [] };
-  } catch (error) {
-    return { ok: false, error: error.message };
+ipcMain.handle("soma:stopRecording", async () => {
+  if (!sttManager) {
+    return { ok: false, error: "STT not initialized" };
   }
+  const result = await sttManager.stopRecording();
+  return result;
 });
 
-// IPC: Start new session
-ipcMain.handle("soma:new-session", async () => {
-  try {
-    const oldSession = SOMA_SESSION_ID;
-    SOMA_SESSION_ID = startNewSession();
-    return { 
-      ok: true, 
-      oldSessionId: oldSession,
-      newSessionId: SOMA_SESSION_ID,
-      message: "New session started. Previous conversations are saved."
-    };
-  } catch (error) {
-    return { ok: false, error: error.message };
+ipcMain.handle("soma:cancelRecording", async () => {
+  if (!sttManager) {
+    return { ok: false, error: "STT not initialized" };
   }
+  return sttManager.cancelRecording();
 });
+
+ipcMain.handle("soma:getSTTStatus", async () => {
+  if (!sttManager) {
+    return { available: false };
+  }
+  return sttManager.getStatus();
+});
+
 
 
 

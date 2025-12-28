@@ -10,28 +10,29 @@
     .row { display: flex; gap: 8px; align-items: center; }
     input { flex: 1; padding: 10px; font-size: 14px; }
     button { padding: 10px 12px; font-size: 14px; cursor: pointer; }
-    button.small { padding: 6px 8px; font-size: 11px; }
+    button.recording { background: #ff4444; color: white; animation: pulse 1s infinite; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
     .status { margin-top: 8px; font-size: 12px; opacity: 0.8; }
     .reply { margin-top: 8px; font-size: 12px; max-height: 48px; overflow: hidden; opacity: 0.9; }
-    .session-info { margin-top: 8px; font-size: 11px; opacity: 0.7; display: flex; gap: 8px; align-items: center; }
+    .voice-indicator { display: none; color: #ff4444; font-weight: bold; margin-top: 4px; font-size: 11px; }
+    .voice-indicator.active { display: block; }
   </style>
 </head>
 <body>
   <div class="row">
-    <input id="txt" placeholder="Type to Soma…" autofocus />
+    <input id="txt" placeholder="Type or press 🎤 to speak…" autofocus />
+    <button id="voice" title="Voice Input (Ctrl+Shift+V)">🎤</button>
     <button id="snap" title="Snapshot">📸</button>
     <button id="send">Send</button>
     <button id="stop" title="Stop speaking">⛔</button>
   </div>
 
-  <div class="status" id="status">Audio-first mode. Ctrl+M = mute. Ctrl+Shift+S = stop.</div>
-  <div class="reply" id="reply"></div>
-
-  <div class="session-info">
-    <span id="sessionInfo">Session: Loading...</span>
-    <button class="small" id="viewHistory" title="View conversation history">📜 History</button>
-    <button class="small" id="newSession" title="Start new session">🔄 New</button>
-  </div>
+  <div class="voice-indicator" id="voiceIndicator">● Recording... (click 🎤 to stop)</div>
+  <div class="status" id="status">Audio-first mode. Ctrl+Shift+V = voice. Ctrl+M = mute. Ctrl+Shift+S = stop.</div>
+    <div class="reply" id="reply"></div>
 
   <div class="status" style="margin-top:10px; font-weight:bold;">Session transcript</div>
   <div id="transcript" style="margin-top:6px; border:1px solid #ddd; padding:8px; height:260px; overflow:auto; white-space:pre-wrap; font-size:12px; background:#fafafa;"></div>
@@ -40,13 +41,12 @@
     const txt = document.getElementById("txt");
     const send = document.getElementById("send");
     const snap = document.getElementById("snap");
+    const voiceBtn = document.getElementById("voice");
     const stopBtn = document.getElementById("stop");
     const status = document.getElementById("status");
     const replyBox = document.getElementById("reply");
     const transcript = document.getElementById("transcript");
-    const sessionInfo = document.getElementById("sessionInfo");
-    const viewHistoryBtn = document.getElementById("viewHistory");
-    const newSessionBtn = document.getElementById("newSession");
+    const voiceIndicator = document.getElementById("voiceIndicator");
 
 function nowTime() {
   const d = new Date();
@@ -59,63 +59,52 @@ function addLogLine(who, msg) {
   transcript.scrollTop = transcript.scrollHeight;
 }
 
-    // Load session info on startup
-    async function loadSessionInfo() {
-      const info = await window.soma.getSessionInfo();
-      if (info.ok) {
-        const ageText = info.ageDays > 0 
-          ? `${info.ageDays} day${info.ageDays > 1 ? 's' : ''} old`
-          : `${info.ageHours} hour${info.ageHours !== 1 ? 's' : ''} old`;
-        sessionInfo.textContent = `Session: ${ageText}`;
+    let muted = false;
+    let isRecording = false;
+
+    // Voice recording toggle
+    async function toggleVoiceRecording() {
+      if (isRecording) {
+        // Stop recording and transcribe
+        voiceBtn.disabled = true;
+        status.textContent = "Transcribing...";
+        voiceIndicator.classList.remove("active");
+        voiceBtn.classList.remove("recording");
+        
+        const result = await window.soma.stopRecording();
+        
+        voiceBtn.disabled = false;
+        isRecording = false;
+        
+        if (result.ok && result.text) {
+          txt.value = result.text.trim();
+          status.textContent = "Voice input ready - press Send";
+          txt.focus();
+          addLogLine("Voice", result.text.trim());
+        } else {
+          status.textContent = result.error || "Voice input failed";
+        }
+      } else {
+        // Start recording
+        const result = await window.soma.startRecording();
+        
+        if (result.ok) {
+          isRecording = true;
+          voiceBtn.classList.add("recording");
+          voiceIndicator.classList.add("active");
+          status.textContent = "🎤 Listening... (click again or Ctrl+Shift+V to stop)";
+        } else {
+          status.textContent = result.error || "Failed to start recording";
+        }
       }
     }
 
-    // View history
-    viewHistoryBtn.addEventListener("click", async () => {
-      status.textContent = "Loading history...";
-      const result = await window.soma.getHistory();
-      
-      if (result.ok && result.history.length > 0) {
-        transcript.textContent = "";
-        addLogLine("System", `=== Loaded ${result.history.length} messages from database ===`);
-        
-        result.history.forEach(msg => {
-          const time = new Date(msg.timestamp).toLocaleTimeString();
-          const who = msg.role === "user" ? "You" : "Soma";
-          transcript.textContent += `[${time}] ${who}: ${msg.content}\n`;
-        });
-        
-        transcript.scrollTop = transcript.scrollHeight;
-        status.textContent = `Loaded ${result.history.length} messages from database.`;
-      } else if (result.ok) {
-        addLogLine("System", "No history found for this session.");
-        status.textContent = "No history found.";
-      } else {
-        status.textContent = "Failed to load history.";
+    // Listen for global hotkey
+    window.soma.onVoiceHotkey(() => {
+      if (voiceBtn && !voiceBtn.disabled) {
+        toggleVoiceRecording();
       }
     });
-
-    // Start new session
-    newSessionBtn.addEventListener("click", async () => {
-      if (!confirm("Start a new session? Current conversation will be saved.")) {
-        return;
-      }
-      
-      status.textContent = "Starting new session...";
-      const result = await window.soma.newSession();
-      
-      if (result.ok) {
-        transcript.textContent = "";
-        addLogLine("System", "=== New session started ===");
-        addLogLine("System", "Previous conversations are saved in the database.");
-        status.textContent = "New session started!";
-        loadSessionInfo();
-      } else {
-        status.textContent = "Failed to start new session.";
-      }
-    });
-
-    let muted = false;
 
     async function doSend() {
       const val = txt.value.trim();
@@ -127,12 +116,14 @@ function addLogLine(who, msg) {
       replyBox.textContent = "";
       send.disabled = true;
       snap.disabled = true;
+      voiceBtn.disabled = true;
       txt.disabled = true;
 
       const result = await window.soma.send(val);
 
       send.disabled = false;
       snap.disabled = false;
+      voiceBtn.disabled = false;
       txt.disabled = false;
       txt.value = "";
       txt.focus();
@@ -153,11 +144,13 @@ function addLogLine(who, msg) {
       replyBox.textContent = "";
       send.disabled = true;
       snap.disabled = true;
+      voiceBtn.disabled = true;
 
       const result = await window.soma.snapshot();
 
       send.disabled = false;
       snap.disabled = false;
+      voiceBtn.disabled = false;
       txt.focus();
 
       if (result.ok) {
@@ -177,6 +170,7 @@ function addLogLine(who, msg) {
 
     send.addEventListener("click", doSend);
     snap.addEventListener("click", doSnapshot);
+    voiceBtn.addEventListener("click", toggleVoiceRecording);
 
     document.addEventListener("keydown", async (e) => {
       if (e.ctrlKey && e.key.toLowerCase() === "m") {
@@ -188,11 +182,31 @@ function addLogLine(who, msg) {
 
     txt.addEventListener("keydown", (e) => {
       if (e.key === "Enter") doSend();
-      if (e.key === "Escape") window.close();
+      if (e.key === "Escape") {
+        if (isRecording) {
+          window.soma.cancelRecording();
+          isRecording = false;
+          voiceBtn.classList.remove("recording");
+          voiceIndicator.classList.remove("active");
+          status.textContent = "Recording cancelled.";
+        } else {
+          window.close();
+        }
+      }
     });
 
-    // Load session info when app starts
-    loadSessionInfo();
+    // Check STT status on load
+    window.soma.getSTTStatus().then(sttStatus => {
+      if (sttStatus.available) {
+        console.log('STT Engine:', sttStatus.engine, '- Quality:', sttStatus.quality);
+        if (sttStatus.engine === 'Windows Speech') {
+          status.textContent += ' [STT: Fallback mode - install Whisper for better quality]';
+        }
+      } else {
+        voiceBtn.disabled = true;
+        voiceBtn.title = "Voice input unavailable";
+      }
+    });
   </script>
 </body>
 </html>

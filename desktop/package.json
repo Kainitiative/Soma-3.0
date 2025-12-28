@@ -6,7 +6,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "electron .",
-    "dev": "electron ."
+    "dev": "electron .",
+    "postinstall": "node download-whisper.js"
   },
   "keywords": [],
   "author": "",
@@ -16,6 +17,8 @@
     "active-win": "^8.2.1",
     "electron": "^39.2.7",
     "screenshot-desktop": "^1.15.3",
-    "sharp": "^0.34.5"
+    "sharp": "^0.34.5",
+    "node-record-lpcm16": "^1.0.1",
+    "node-whisper": "^1.0.0"
   }
 }
