@@ -1,0 +1,132 @@
+﻿<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Soma 3</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 10px; }
+    .row { display: flex; gap: 8px; align-items: center; }
+    input { flex: 1; padding: 10px; font-size: 14px; }
+    button { padding: 10px 12px; font-size: 14px; cursor: pointer; }
+    .status { margin-top: 8px; font-size: 12px; opacity: 0.8; }
+    .reply { margin-top: 8px; font-size: 12px; max-height: 48px; overflow: hidden; opacity: 0.9; }
+  </style>
+</head>
+<body>
+  <div class="row">
+    <input id="txt" placeholder="Type to Soma…" autofocus />
+    <button id="snap" title="Snapshot">📸</button>
+    <button id="send">Send</button>
+    <button id="stop" title="Stop speaking">⛔</button>
+  </div>
+
+  <div class="status" id="status">Audio-first mode. Ctrl+M = mute. Ctrl+Shift+S = stop.</div>
+    <div class="reply" id="reply"></div>
+
+  <div class="status" style="margin-top:10px; font-weight:bold;">Session transcript</div>
+  <div id="transcript" style="margin-top:6px; border:1px solid #ddd; padding:8px; height:260px; overflow:auto; white-space:pre-wrap; font-size:12px; background:#fafafa;"></div>
+
+  <script>
+    const txt = document.getElementById("txt");
+    const send = document.getElementById("send");
+    const snap = document.getElementById("snap");
+    const stopBtn = document.getElementById("stop");
+    const status = document.getElementById("status");
+    const replyBox = document.getElementById("reply");
+const transcript = document.getElementById("transcript");
+
+function nowTime() {
+  const d = new Date();
+  return d.toLocaleTimeString();
+}
+
+function addLogLine(who, msg) {
+  if (!transcript) return;
+  transcript.textContent += `[${nowTime()}] ${who}: ${msg}\n`;
+  transcript.scrollTop = transcript.scrollHeight;
+}
+
+    let muted = false;
+
+    async function doSend() {
+      const val = txt.value.trim();
+      if (!val) return;
+
+      addLogLine("You", val);
+
+      status.textContent = "Sending…";
+      replyBox.textContent = "";
+      send.disabled = true;
+      snap.disabled = true;
+      txt.disabled = true;
+
+      const result = await window.soma.send(val);
+
+      send.disabled = false;
+      snap.disabled = false;
+      txt.disabled = false;
+      txt.value = "";
+      txt.focus();
+
+      if (result.ok) {
+        status.textContent = muted ? "Muted." : "Spoken.";
+        replyBox.textContent = result.reply;
+        addLogLine("Soma", result.reply);
+      } else {
+        status.textContent = "Error (see text).";
+        replyBox.textContent = result.error || "Unknown error.";
+      }
+    }
+
+    async function doSnapshot() {
+      status.textContent = "Taking snapshot…";
+      addLogLine("You", "📸 (snapshot)");
+      replyBox.textContent = "";
+      send.disabled = true;
+      snap.disabled = true;
+
+      const result = await window.soma.snapshot();
+
+      send.disabled = false;
+      snap.disabled = false;
+      txt.focus();
+
+      if (result.ok) {
+        status.textContent = muted ? "Muted." : "Snapshot spoken.";
+        replyBox.textContent = result.reply;
+        addLogLine("Soma", result.reply);
+      } else {
+        status.textContent = "Snapshot error (see text).";
+        replyBox.textContent = result.error || "Unknown error.";
+      }
+    }
+
+    stopBtn.addEventListener("click", async () => {
+      await window.soma.stop();
+      status.textContent = "Speech stopped.";
+    });
+
+    send.addEventListener("click", doSend);
+    snap.addEventListener("click", doSnapshot);
+
+    document.addEventListener("keydown", async (e) => {
+      if (e.ctrlKey && e.key.toLowerCase() === "m") {
+        muted = !muted;
+        await window.soma.mute(muted);
+        status.textContent = muted ? "Muted." : "Unmuted.";
+      }
+    });
+
+    txt.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") doSend();
+      if (e.key === "Escape") window.close();
+    });
+  </script>
+</body>
+</html>
+
+
+
+

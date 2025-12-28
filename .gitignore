@@ -1,0 +1,6 @@
+﻿node_modules/
+.env
+*.log
+server.backup*.js
+main.backup*.js
+index.backup*.html
